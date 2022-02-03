@@ -2,11 +2,13 @@ package mr
 
 import (
 	"encoding/json"
+	"fmt"
 	"hash/fnv"
 	"io/ioutil"
 	"log"
 	"net/rpc"
 	"os"
+	"sort"
 	"strconv"
 	"time"
 )
@@ -18,6 +20,14 @@ type KeyValue struct {
 	Key   string
 	Value string
 }
+
+// for sorting by key.
+type ByKey []KeyValue
+
+// for sorting by key.
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
 //
 // use ihash(key) % NReduce to choose the reduce
@@ -41,11 +51,11 @@ func Worker(mapf func(string, string) []KeyValue,
 	//CallExample()
 
 	for {
-		switch nReduce,taskType, taskNumber := CallGetTask(); taskType{
+		switch nMap,nReduce,taskType, taskNumber := CallGetTask(); taskType{
 		case MAP:
 			PerformMap(nReduce,taskNumber, mapf)
 		case REDUCE:
-
+			PerformReduce(nMap,taskNumber,reducef)
 		case EXIT:
 			return
 		default:
@@ -57,13 +67,13 @@ func Worker(mapf func(string, string) []KeyValue,
 }
 
 //
-// This function performs the Map operation as specified in the Mapf pointer
+// This function performs the Map operation as specified in the mapf pointer
 //
 // read each input file,
 // pass it to Map,
-// accumulate the intermediate Map output.
+// accumulate the intermediate Map output in separate files
 //
-func PerformMap(nReduce int, taskNumber int, mapf func(string,string) []KeyValue) []KeyValue{
+func PerformMap(nReduce int, taskNumber int, mapf func(string,string) []KeyValue) {
     //
 	filename := CallGetFileName(taskNumber)
     intermediate := []KeyValue{}
@@ -100,15 +110,105 @@ func PerformMap(nReduce int, taskNumber int, mapf func(string,string) []KeyValue
 				log.Fatalf("cannot encode key value\n")
 			}
 		}
+		storefile.Close()
 	}
 
-	return intermediate
+	CallTaskDone(MAP, taskNumber)
+
+}
+
+//
+// This function performs the Reduce operation as specified in the reducef pointer
+//
+// read intermediate output from map
+// sort intermediate keys
+// pass it to reduce
+// accumulate the output
+//
+func PerformReduce(nMap int, taskNumber int, reducef func(string, []string) string) {
+
+	var intermediate []KeyValue
+	// Read intermediate file output from map
+	for i:=0 ; i < nMap; i++ {
+
+		ifilename := "mr-" + strconv.Itoa(i) + "-" + strconv.Itoa(taskNumber)
+		ifile, err := os.Open(ifilename)
+		if err != nil {
+			log.Printf("error %v", err)
+			log.Fatalf("cannot open %v", ifile)
+		}
+
+		dec := json.NewDecoder(ifile)
+
+		for {
+			var kv KeyValue
+			if err := dec.Decode(&kv); err != nil {
+				break
+			}
+			intermediate = append(intermediate,kv)
+		}
+
+	}
+
+
+	// sort intermediate output
+	sort.Sort(ByKey(intermediate))
+
+	oname := "mr-out-" + strconv.Itoa(taskNumber)
+	ofile, _ := os.Create(oname)
+
+	//
+	// call Reduce on each distinct key in intermediate[],
+	// and print the result to mr-out-R
+	//
+	i := 0
+	for i < len(intermediate) {
+		//log.Printf("%v %v\n",intermediate[i].Key, intermediate[i].Value)
+		j := i + 1
+		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+			j++
+		}
+		values := []string{}
+		for k := i; k < j; k++ {
+			values = append(values, intermediate[k].Value)
+		}
+		output := reducef(intermediate[i].Key, values)
+
+		// this is the correct format for each line of Reduce output.
+		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
+
+		i = j
+	}
+
+	ofile.Close()
+
+	CallTaskDone(REDUCE, taskNumber)
+
+}
+
+//
+// function to acknowledge that task is done
+//
+func CallTaskDone(taskType int, taskNumber int) {
+
+	// declare an argument structure.
+	args := TaskDoneArgs{}
+
+	// fill in the argument(s).
+	args.TaskType = taskType
+	args.TaskNumber = taskNumber
+
+	// declare a reply structure.
+	reply := TaskTypeReply{}
+
+	// send the RPC request, wait for the reply.
+	call("Coordinator.TaskDone", &args, &reply)
 }
 
 //
 // function to get a either a map or a reduce task from the coordinator.
 //
-func CallGetTask() (int,int,int) {
+func CallGetTask() (int,int,int,int) {
 
 	// declare an argument structure.
 	args := TaskTypeArgs{}
@@ -123,11 +223,11 @@ func CallGetTask() (int,int,int) {
 
 	log.Printf("reply.TaskType %v\n",reply.TaskType)
 	log.Printf("reply.TaskNumber %v\n", reply.TaskNumber)
+	log.Printf("reply.nMap %v\n", reply.NMap)
 	log.Printf("reply.nReduce %v\n", reply.NReduce)
 
-	return reply.NReduce, reply.TaskType,reply.TaskNumber
+	return reply.NMap, reply.NReduce, reply.TaskType,reply.TaskNumber
 }
-
 //
 // function to get a file split from the coordinator.
 //

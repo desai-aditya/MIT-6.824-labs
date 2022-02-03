@@ -39,6 +39,26 @@ func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
 	return nil
 }
 
+//
+// RPC handler for the case when workers report task is done
+//
+func (c *Coordinator) TaskDone(args *TaskDoneArgs, reply *TaskDoneReply) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	switch args.TaskType {
+	case MAP:
+		c.mapTaskList[args.TaskNumber] = DONE	
+
+	case REDUCE:
+		c.reduceTaskList[args.TaskNumber] = DONE	
+
+	default:
+		log.Fatalf("No such task %v\n",args.TaskType)
+	}
+	return nil
+}
+
 // 
 // Function to check if any map tasks are idle
 //
@@ -110,9 +130,13 @@ func (c *Coordinator) GiveTaskType(args *TaskTypeArgs, reply *TaskTypeReply) err
 				c.mapTaskList[i] = INPROGRESS
 				reply.TaskNumber = i
 				reply.NReduce = c.nReduce
+				reply.NMap = c.nMap
 				return nil
 			}
 		}
+	}
+
+	for !c.allMapDone() {
 	}
 
 	if c.anyReduceIdle(){
@@ -123,10 +147,15 @@ func (c *Coordinator) GiveTaskType(args *TaskTypeArgs, reply *TaskTypeReply) err
 			if c.reduceTaskList[i] == IDLE {
 				c.reduceTaskList[i] = INPROGRESS
 				reply.TaskNumber = i
+				reply.NReduce = c.nReduce
+				reply.NMap = c.nMap
 				return nil
 			}
 		}
 
+	}
+
+	for !c.allReduceDone() {
 	}
 
 	reply.TaskType = EXIT

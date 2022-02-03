@@ -48,9 +48,17 @@ type TaskTypeReply struct {
 	TaskType int	
 	TaskNumber int	
 	NReduce int	
+	NMap int	
 }
 
+// RPC definitions for reporting when tasks are done
+type TaskDoneArgs struct{
+	TaskType int
+	TaskNumber int
+}
 
+type TaskDoneReply struct {
+}
 
 
 // Cook up a unique-ish UNIX-domain socket name
