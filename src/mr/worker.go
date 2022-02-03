@@ -56,6 +56,8 @@ func Worker(mapf func(string, string) []KeyValue,
 			PerformMap(nReduce,taskNumber, mapf)
 		case REDUCE:
 			PerformReduce(nMap,taskNumber,reducef)
+		case WAIT:
+			//log.Printf("Waiting\n")
 		case EXIT:
 			return
 		default:
@@ -203,6 +205,13 @@ func CallTaskDone(taskType int, taskNumber int) {
 
 	// send the RPC request, wait for the reply.
 	call("Coordinator.TaskDone", &args, &reply)
+
+	//taskString := "map"
+	//if taskType == REDUCE {
+	//	taskString = "reduce"
+	//}
+
+	//log.Printf("%v Task done by number : %v\n", taskString,taskNumber)
 }
 
 //
@@ -221,10 +230,10 @@ func CallGetTask() (int,int,int,int) {
 	// send the RPC request, wait for the reply.
 	call("Coordinator.GiveTaskType", &args, &reply)
 
-	log.Printf("reply.TaskType %v\n",reply.TaskType)
-	log.Printf("reply.TaskNumber %v\n", reply.TaskNumber)
-	log.Printf("reply.nMap %v\n", reply.NMap)
-	log.Printf("reply.nReduce %v\n", reply.NReduce)
+	//log.Printf("reply.TaskType %v\n",reply.TaskType)
+	//log.Printf("reply.TaskNumber %v\n", reply.TaskNumber)
+	//log.Printf("reply.nMap %v\n", reply.NMap)
+	//log.Printf("reply.nReduce %v\n", reply.NReduce)
 
 	return reply.NMap, reply.NReduce, reply.TaskType,reply.TaskNumber
 }
@@ -246,7 +255,7 @@ func CallGetFileName(taskNumber int) string {
 	call("Coordinator.GiveMapFiles", &args, &reply)
 
 	// Print reply
-	log.Printf("reply.FilePath %v\n", reply.FilePath)
+	//log.Printf("reply.FilePath %v\n", reply.FilePath)
 
 	return reply.FilePath
 }

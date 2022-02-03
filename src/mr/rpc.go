@@ -14,6 +14,7 @@ import (
 const (
 	MAP = iota
 	REDUCE 
+	WAIT
 	EXIT
 )
 //

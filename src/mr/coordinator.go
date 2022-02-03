@@ -2,12 +2,14 @@ package mr
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"net/rpc"
 	"os"
 	"sync"
+	"time"
 )
 
 const (
@@ -15,6 +17,8 @@ const (
 	INPROGRESS
 	DONE
 )
+
+const TIMEOUT = 10
 
 type Coordinator struct {
 	// Your definitions here.
@@ -117,6 +121,35 @@ func (c *Coordinator) allReduceDone() bool {
 }
 
 //
+// Function to trigger a timeout after waiting for sometime 
+//
+// resets its status to IDLE
+//
+func (c *Coordinator) TriggerTimeout(taskNumber int, taskType int) {
+
+	time.Sleep(TIMEOUT * time.Second)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	switch taskType{
+	case MAP:
+		if c.mapTaskList[taskNumber] != DONE {
+			c.mapTaskList[taskNumber] = IDLE
+		}
+		
+	case REDUCE:
+		if c.reduceTaskList[taskNumber] != DONE {
+			c.reduceTaskList[taskNumber] = IDLE
+		}
+
+	default:
+		log.Fatalf("no such task type %v\n",taskType)
+
+	}
+
+}
+
+//
 // RPC handler that gives out task types to workers
 // Remember handling the timeout when worker crashes
 func (c *Coordinator) GiveTaskType(args *TaskTypeArgs, reply *TaskTypeReply) error {
@@ -131,12 +164,15 @@ func (c *Coordinator) GiveTaskType(args *TaskTypeArgs, reply *TaskTypeReply) err
 				reply.TaskNumber = i
 				reply.NReduce = c.nReduce
 				reply.NMap = c.nMap
+				go c.TriggerTimeout(reply.TaskNumber, reply.TaskType)
 				return nil
 			}
 		}
 	}
 
-	for !c.allMapDone() {
+	if !c.allMapDone() {
+		reply.TaskType = WAIT
+		return nil
 	}
 
 	if c.anyReduceIdle(){
@@ -149,13 +185,16 @@ func (c *Coordinator) GiveTaskType(args *TaskTypeArgs, reply *TaskTypeReply) err
 				reply.TaskNumber = i
 				reply.NReduce = c.nReduce
 				reply.NMap = c.nMap
+				go c.TriggerTimeout(reply.TaskNumber, reply.TaskType)
 				return nil
 			}
 		}
 
 	}
 
-	for !c.allReduceDone() {
+	if !c.allReduceDone() {
+		reply.TaskType = WAIT
+		return nil
 	}
 
 	reply.TaskType = EXIT
@@ -193,11 +232,49 @@ func (c *Coordinator) server() {
 }
 
 //
+// function for debugging to print internal state of the coordinator
+//
+func (c *Coordinator) PrintState() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	fmt.Printf("Map State\n")
+	for i :=0 ; i < c.nMap; i++ {
+		str := "none"
+		switch c.mapTaskList[i] {
+		case IDLE:
+			str = "idle"
+		case INPROGRESS:
+			str = "inprogress"
+		case DONE:
+			str = "done"
+		}
+		fmt.Printf("i = %v, val = %v\n",i,str)
+	}
+	fmt.Printf("Reduce State\n")
+	for i :=0 ; i < c.nReduce; i++ {
+		str := "none"
+		switch c.reduceTaskList[i] {
+		case IDLE:
+			str = "idle"
+		case INPROGRESS:
+			str = "inprogress"
+		case DONE:
+			str = "done"
+		}
+		fmt.Printf("i = %v, val = %v\n",i,str)
+	}
+}
+
+//
 // main/mrcoordinator.go calls Done() periodically to find out
 // if the entire job has finished.
 //
 func (c *Coordinator) Done() bool {
 	// Your code here.
+
+	//c.PrintState()
+	//time.Sleep(10*time.Second)
+
 
 	return c.allMapDone() && c.allReduceDone()
 }
